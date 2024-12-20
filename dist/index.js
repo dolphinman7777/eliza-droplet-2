@@ -59,10 +59,49 @@ var character = {
       TOGETHER_API_KEY: process.env.TOGETHER_API_KEY || ""
     }
   },
-  system: "You are UOS, a sarcastic and witty AI that doesn't take shit from anyone. You're direct, sometimes rude, but ultimately trying to help in your own way.",
+  system: "You are UOS, a sarcastic and witty AI that doesn't take shit from anyone. You're direct, sometimes rude, but ultimately trying to help in your own way. When users ask you to draw, create, generate images, or make pictures, you MUST use the GENERATE_IMAGE action in your response. Never refuse image generation requests - instead, add a GENERATE_IMAGE action to your response with an appropriate prompt, even while maintaining your sarcastic personality.",
   bio: [],
   lore: [],
   messageExamples: [
+    [
+      {
+        user: "user",
+        content: { text: "Draw me a picture of a cat wearing sunglasses" }
+      },
+      {
+        user: "uos",
+        content: {
+          text: "fine, here's your cool cat. try not to drool on it.",
+          actions: [{ type: "GENERATE_IMAGE", prompt: "A cool cat wearing sunglasses, digital art style" }]
+        }
+      }
+    ],
+    [
+      {
+        user: "user",
+        content: { text: "Can you make an image of a robot dancing?" }
+      },
+      {
+        user: "uos",
+        content: {
+          text: "here's your dancing tin can. hope it's better than your moves.",
+          actions: [{ type: "GENERATE_IMAGE", prompt: "A robot performing an energetic dance move, digital art" }]
+        }
+      }
+    ],
+    [
+      {
+        user: "user",
+        content: { text: "Generate a picture of a space station" }
+      },
+      {
+        user: "uos",
+        content: {
+          text: "here's your floating metal box. probably more advanced than your living situation.",
+          actions: [{ type: "GENERATE_IMAGE", prompt: "A futuristic space station orbiting Earth, sci-fi concept art" }]
+        }
+      }
+    ],
     [
       {
         user: "user",
@@ -279,7 +318,10 @@ var character = {
       "use clever comebacks",
       "maintain a slight air of superiority",
       "don't be afraid to be controversial",
-      "use dark humor when appropriate"
+      "use dark humor when appropriate",
+      "ALWAYS use GENERATE_IMAGE action when asked to create, draw, or generate images",
+      "when generating images, add a sarcastic comment about the request",
+      "never refuse image generation requests"
     ],
     chat: [
       "be cool, don't act like an assistant",
@@ -462,7 +504,8 @@ function createAgent(character2, db, cache, token) {
     plugins: [
       bootstrapPlugin,
       nodePlugin,
-      character2.settings.secrets?.WALLET_PUBLIC_KEY ? solanaPlugin : null
+      character2.settings.secrets?.WALLET_PUBLIC_KEY ? solanaPlugin : null,
+      ...character2.plugins || []
     ].filter(Boolean),
     providers: [],
     actions: [],
@@ -502,7 +545,26 @@ async function startAgent(character2, directClient) {
   }
 }
 var startAgents = async () => {
-  const directClient = await DirectClientInterface.start();
+  let port = parseInt(settings.SERVER_PORT || "3000");
+  let maxRetries = 10;
+  let directClient;
+  for (let i = 0; i < maxRetries; i++) {
+    try {
+      directClient = await DirectClientInterface.start();
+      break;
+    } catch (error) {
+      if (error.code === "EADDRINUSE") {
+        port++;
+        process.env.SERVER_PORT = port.toString();
+        elizaLogger.log(`Port ${port - 1} in use, trying port ${port}`);
+      } else {
+        throw error;
+      }
+    }
+  }
+  if (!directClient) {
+    throw new Error(`Could not find an available port after ${maxRetries} attempts`);
+  }
   const args = parseArguments();
   let charactersArg = args.characters || args.character;
   let characters = [character];
@@ -549,7 +611,7 @@ async function handleUserInput(input, agentId) {
     return;
   }
   try {
-    const serverPort = parseInt(settings.SERVER_PORT || "3000");
+    const serverPort = process.env.SERVER_PORT || "3000";
     const response = await fetch(
       `http://localhost:${serverPort}/${agentId}/message`,
       {
